@@ -66,6 +66,7 @@
 #include "runtime/routine_load/routine_load_task_executor.h"
 #include "runtime/runtime_filter_worker.h"
 #include "service/brpc.h"
+#include "storage/local_tablet_reader.h"
 #include "storage/storage_engine.h"
 #include "storage/txn_manager.h"
 #include "util/stopwatch.hpp"
@@ -886,7 +887,12 @@ void PInternalServiceImplBase<T>::local_tablet_reader_multi_get(google::protobuf
                                                                 PTabletReaderMultiGetResult* response,
                                                                 google::protobuf::Closure* done) {
     ClosureGuard closure_guard(done);
-    response->mutable_status()->set_status_code(TStatusCode::NOT_IMPLEMENTED_ERROR);
+    auto st = handle_tablet_multi_get_rpc(*request, *response);
+    if (!st.ok()) {
+        LOG(WARNING) << "handle tablet multi get rpc failed: " << st << " tablet: " << request->tablet_id()
+                     << " version:" << request->version();
+    }
+    st.to_protobuf(response->mutable_status());
 }
 
 template <typename T>
