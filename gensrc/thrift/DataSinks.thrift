@@ -180,10 +180,10 @@ struct TOlapTableSink {
     7: required bool need_gen_rollup // Deprecated
     8: optional string db_name
     9: optional string table_name
-    10: required Descriptors.TOlapTableSchemaParam schema
-    11: required Descriptors.TOlapTablePartitionParam partition
-    12: required Descriptors.TOlapTableLocationParam location
-    13: required Descriptors.TNodesInfo nodes_info
+    10: required Exprs.TOlapTableSchemaParam schema
+    11: required Exprs.TOlapTablePartitionParam partition
+    12: required Exprs.TOlapTableLocationParam location
+    13: required Exprs.TNodesInfo nodes_info
     14: optional i64 load_channel_timeout_s // the timeout of load channels in second
     15: optional bool is_lake_table
     16: optional string txn_trace_parent

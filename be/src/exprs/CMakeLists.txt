@@ -86,6 +86,7 @@ set(EXPR_FILES
   lambda_function.cpp
   array_map_expr.cpp
   subfield_expr.cpp
+  dict_query_expr.cpp
 )
 
 add_library(Exprs ${EXPR_FILES})

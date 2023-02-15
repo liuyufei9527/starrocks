@@ -401,6 +401,8 @@ public class FunctionSet {
     // Struct functions:
     public static final String ROW = "row";
 
+    public static final String DICT_GET = "dict_get";
+
     // JSON functions
     public static final Function JSON_QUERY_FUNC = new Function(
             new FunctionName(JSON_QUERY), new Type[] {Type.JSON, Type.VARCHAR}, Type.JSON, false);

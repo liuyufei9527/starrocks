@@ -37,6 +37,7 @@ import com.starrocks.analysis.ColumnPosition;
 import com.starrocks.analysis.CompoundPredicate;
 import com.starrocks.analysis.DateLiteral;
 import com.starrocks.analysis.DecimalLiteral;
+import com.starrocks.analysis.DictQueryExpr;
 import com.starrocks.analysis.ExistsPredicate;
 import com.starrocks.analysis.Expr;
 import com.starrocks.analysis.FloatLiteral;
@@ -78,13 +79,17 @@ import com.starrocks.analysis.VarBinaryLiteral;
 import com.starrocks.analysis.VariableExpr;
 import com.starrocks.catalog.AggregateType;
 import com.starrocks.catalog.ArrayType;
+import com.starrocks.catalog.Database;
 import com.starrocks.catalog.FunctionSet;
 import com.starrocks.catalog.KeysType;
 import com.starrocks.catalog.MapType;
+import com.starrocks.catalog.MaterializedView;
+import com.starrocks.catalog.OlapTable;
 import com.starrocks.catalog.PrimitiveType;
 import com.starrocks.catalog.ScalarType;
 import com.starrocks.catalog.StructField;
 import com.starrocks.catalog.StructType;
+import com.starrocks.catalog.Table;
 import com.starrocks.catalog.Type;
 import com.starrocks.common.AnalysisException;
 import com.starrocks.common.Config;
@@ -95,6 +100,7 @@ import com.starrocks.common.NotImplementedException;
 import com.starrocks.common.util.DateUtils;
 import com.starrocks.mysql.MysqlPassword;
 import com.starrocks.qe.SqlModeHelper;
+import com.starrocks.server.GlobalStateMgr;
 import com.starrocks.sql.analyzer.AnalyzerUtils;
 import com.starrocks.sql.analyzer.RelationId;
 import com.starrocks.sql.analyzer.SemanticException;
@@ -392,6 +398,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static java.util.stream.Collectors.toList;
@@ -2245,8 +2252,8 @@ public class AstBuilder extends StarRocksBaseVisitor<ParseNode> {
             if (formatPropsContext.booleanValue() != null) {
                 trimspace = Boolean.parseBoolean(formatPropsContext.booleanValue().getText());
             }
-            csvFormat = new CsvFormat(enclose == null ? 0 : (byte) enclose.charAt(0), 
-                                      escape == null ? 0 : (byte) escape.charAt(0), 
+            csvFormat = new CsvFormat(enclose == null ? 0 : (byte) enclose.charAt(0),
+                                      escape == null ? 0 : (byte) escape.charAt(0),
                                       skipheader, trimspace);
         } else {
             csvFormat = new CsvFormat((byte) 0, (byte) 0, 0, false);
@@ -4783,6 +4790,50 @@ public class AstBuilder extends StarRocksBaseVisitor<ParseNode> {
             Expr e1 = (Expr) visit(context.expression(0));
             Expr e2 = context.expression().size() > 1 ? (Expr) visit(context.expression(1)) : null;
             return new ArithmeticExpr(ArithmeticExpr.getArithmeticOperator(fnName.getFunction()), e1, e2);
+        }
+
+        if (functionName.equals(FunctionSet.DICT_GET)) {
+            List<Expr> params = visit(context.expression(), Expr.class);
+            if (params.size() != 4) {
+                throw new SemanticException("dict_get function params should be 4.");
+            }
+            if (!(params.get(0) instanceof StringLiteral)) {
+                throw new SemanticException("dict_get function first param 'db.table' should be string literal.");
+            }
+            if (!(params.get(2) instanceof StringLiteral)) {
+                throw new SemanticException("dict_get function third param 'key_field' should be string literal.");
+            }
+            if (!(params.get(3) instanceof StringLiteral)) {
+                throw new SemanticException("dict_get function forth param 'value_field' should be string literal.");
+            }
+            GlobalStateMgr globalStateMgr = GlobalStateMgr.getCurrentState();
+            final String dictTable = ((StringLiteral) params.get(0)).getStringValue();
+            final String dbName = dictTable.split("\\.")[0];
+            final String tblName = dictTable.split("\\.")[1];
+            Database db = globalStateMgr.getDb(dbName);
+            if (db == null) {
+                throw new SemanticException("unknown database, database=" + dbName);
+            }
+            if (!db.tryReadLock(5000, TimeUnit.MILLISECONDS)) {
+                throw new SemanticException("get database read lock timeout, database=" + dbName);
+            }
+            Table table;
+            try {
+                table = db.getTable(tblName);
+                if (table == null) {
+                    throw new SemanticException("unknown table, table=" + tblName);
+                }
+                if (!(table instanceof OlapTable)) {
+                    throw new SemanticException("dict table type is not OlapTable, type=" + table.getClass());
+                }
+                if (table instanceof MaterializedView) {
+                    throw new SemanticException("dict table can't be materialized view.");
+                }
+            } finally {
+                db.readUnlock();
+            }
+            return new DictQueryExpr(db.getId(), (OlapTable) table, params.get(0), params.get(1),
+                (StringLiteral) params.get(2), (StringLiteral) params.get(3));
         }
 
         FunctionCallExpr functionCallExpr = new FunctionCallExpr(fnName,

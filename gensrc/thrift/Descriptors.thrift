@@ -38,26 +38,9 @@ namespace java com.starrocks.thrift
 include "Types.thrift"
 include "Exprs.thrift"
 
-struct TSlotDescriptor {
-  1: required Types.TSlotId id
-  2: required Types.TTupleId parent
-  3: required Types.TTypeDesc slotType
-  4: required i32 columnPos   // in originating table
-  5: required i32 byteOffset  // into tuple
-  6: required i32 nullIndicatorByte
-  7: required i32 nullIndicatorBit
-  8: required string colName;
-  9: required i32 slotIdx
-  10: required bool isMaterialized
-}
 
-struct TTupleDescriptor {
-  1: required Types.TTupleId id
-  2: required i32 byteSize
-  3: required i32 numNullBytes
-  4: optional Types.TTableId tableId
-  5: optional i32 numNullSlots
-}
+
+
 
 enum THdfsFileFormat {
   TEXT,
@@ -185,97 +168,11 @@ struct TColumn {
     21: optional Types.TTypeDesc type_desc         
 }
 
-struct TOlapTableIndexTablets {
-    1: required i64 index_id
-    2: required list<i64> tablets
-}
-
-// its a closed-open range
-struct TOlapTablePartition {
-    1: required i64 id
-    // deprecated, use 'start_keys' and 'end_keys' instead
-    2: optional Exprs.TExprNode start_key
-    3: optional Exprs.TExprNode end_key
-
-    // how many tablets in one partition
-    4: required i32 num_buckets
-
-    5: required list<TOlapTableIndexTablets> indexes
-
-    6: optional list<Exprs.TExprNode> start_keys
-    7: optional list<Exprs.TExprNode> end_keys
-
-    8: optional list<list<Exprs.TExprNode>> in_keys
-}
-
-struct TOlapTablePartitionParam {
-    1: required i64 db_id
-    2: required i64 table_id
-    3: required i64 version
-
-    // used to split a logical table to multiple paritions
-    // deprecated, use 'partition_columns' instead
-    4: optional string partition_column
-
-    // used to split a partition to multiple tablets
-    5: optional list<string> distributed_columns
-
-    // partitions
-    6: required list<TOlapTablePartition> partitions
-
-    7: optional list<string> partition_columns
-    8: optional list<Exprs.TExpr> partition_exprs
-
-    9: optional bool enable_automatic_partition
-}
-
-struct TOlapTableIndexSchema {
-    1: required i64 id
-    2: required list<string> columns
-    3: required i32 schema_hash
-}
-
-struct TOlapTableSchemaParam {
-    1: required i64 db_id
-    2: required i64 table_id
-    3: required i64 version
-
-    // Logical columns, contain all column that in logical table
-    4: required list<TSlotDescriptor> slot_descs
-    5: required TTupleDescriptor tuple_desc
-    6: required list<TOlapTableIndexSchema> indexes
-}
-
 struct TOlapTableIndex {
   1: optional string index_name
   2: optional list<string> columns
   3: optional TIndexType index_type
   4: optional string comment
-}
-
-struct TTabletLocation {
-    1: required i64 tablet_id
-    2: required list<i64> node_ids
-}
-
-struct TOlapTableLocationParam {
-    1: required i64 db_id
-    2: required i64 table_id
-    3: required i64 version
-    4: required list<TTabletLocation> tablets
-}
-
-struct TNodeInfo {
-    1: required i64 id
-    2: required i64 option
-    3: required string host
-    // used to transfer data between nodes
-    4: required i32 async_internal_port
-}
-
-struct TNodesInfo {
-    1: required i64 version
-    2: required list<TNodeInfo> nodes
 }
 
 struct TOlapTable {
@@ -454,8 +351,8 @@ struct TTableDescriptor {
 }
 
 struct TDescriptorTable {
-  1: optional list<TSlotDescriptor> slotDescriptors;
-  2: required list<TTupleDescriptor> tupleDescriptors;
+  1: optional list<Exprs.TSlotDescriptor> slotDescriptors;
+  2: required list<Exprs.TTupleDescriptor> tupleDescriptors;
 
   // all table descriptors referenced by tupleDescriptors
   3: optional list<TTableDescriptor> tableDescriptors;
@@ -464,13 +361,13 @@ struct TDescriptorTable {
 
 // Describe route info of a Olap Table
 struct TOlapTableRouteInfo {
-  1: optional TOlapTableSchemaParam schema
-  2: optional TOlapTablePartitionParam partition
-  3: optional TOlapTableLocationParam location
+  1: optional Exprs.TOlapTableSchemaParam schema
+  2: optional Exprs.TOlapTablePartitionParam partition
+  3: optional Exprs.TOlapTableLocationParam location
   5: optional i32 num_replicas
   6: optional string db_name
   7: optional string table_name
-  8: optional TNodesInfo nodes_info
+  8: optional Exprs.TNodesInfo nodes_info
   9: optional Types.TKeysType keys_type
 }
 

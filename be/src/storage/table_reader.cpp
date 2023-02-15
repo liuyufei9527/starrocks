@@ -76,8 +76,8 @@ struct TabletMultiGet {
     size_t num_rows{0};
     size_t cur_row{0};
 
-    void add(Chunk& keys, size_t idx, uint32_t orig_idx) {
-        this->keys->append(keys, idx, 1);
+    void add(Chunk& add_keys, size_t idx, uint32_t orig_idx) {
+        this->keys->append(add_keys, idx, 1);
         orig_idxs.push_back(orig_idx);
     }
 
@@ -113,7 +113,7 @@ Status TableReader::multi_get(Chunk& keys, const std::vector<std::string>& value
     validate_selection.assign(num_rows, 1);
     int invalid_row_index = 0;
     RETURN_IF_ERROR(_partition_param->find_tablets(&keys, &partitions, &tablet_indexes, &validate_selection,
-                                                   &invalid_row_index));
+                                                   &invalid_row_index, -1, nullptr));
     // Arrange selection_idx by merging _validate_selection
     // If chunk num_rows is 6
     // _validate_selection is [1, 0, 0, 0, 1, 1]
@@ -160,13 +160,13 @@ Status TableReader::multi_get(Chunk& keys, const std::vector<std::string>& value
     std::unique_ptr<serde::ProtobufChunkMeta> chunk_meta;
     for (auto multi_get : multi_gets) {
         multi_get->values = values.clone_empty();
-        vector<bool> found;
+        vector<bool> sub_found;
         RETURN_IF_ERROR(_tablet_multi_get(multi_get->tablet_id, multi_get->version, *multi_get->keys, value_columns,
-                                          found, *multi_get->values, chunk_meta));
+                                          sub_found, *multi_get->values, chunk_meta));
         multi_get->found_idxs.clear();
-        DCHECK(multi_get->keys->num_rows() == found.size());
-        for (size_t i = 0; i < found.size(); ++i) {
-            if (found[i]) {
+        DCHECK(multi_get->keys->num_rows() == sub_found.size());
+        for (size_t i = 0; i < sub_found.size(); ++i) {
+            if (sub_found[i]) {
                 multi_get->found_idxs.push_back(multi_get->orig_idxs[i]);
             }
         }

@@ -27,6 +27,7 @@ import com.starrocks.analysis.CastExpr;
 import com.starrocks.analysis.CloneExpr;
 import com.starrocks.analysis.CollectionElementExpr;
 import com.starrocks.analysis.CompoundPredicate;
+import com.starrocks.analysis.DictQueryExpr;
 import com.starrocks.analysis.ExistsPredicate;
 import com.starrocks.analysis.Expr;
 import com.starrocks.analysis.FunctionCallExpr;
@@ -314,6 +315,11 @@ public class AggregationAnalyzer {
         @Override
         public Boolean visitCloneExpr(CloneExpr node, Void context) {
             return visit(node.getChild(0));
+        }
+
+        @Override
+        public Boolean visitDictQueryExpr(DictQueryExpr node, Void context) {
+            return node.getChildren().stream().allMatch(this::visit);
         }
     }
 }

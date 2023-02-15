@@ -81,6 +81,7 @@ enum TExprNodeType {
   RUNTIME_FILTER_MIN_MAX_EXPR,
   MAP_ELEMENT_EXPR,
   BINARY_LITERAL,
+  DICT_QUERY_EXPR,
 }
 
 //enum TAggregationOp {
@@ -187,6 +188,121 @@ struct TFunctionCallExpr {
   2: optional i32 vararg_start_idx
 }
 
+struct TSlotDescriptor {
+  1: required Types.TSlotId id
+  2: required Types.TTupleId parent
+  3: required Types.TTypeDesc slotType
+  4: required i32 columnPos   // in originating table
+  5: required i32 byteOffset  // into tuple
+  6: required i32 nullIndicatorByte
+  7: required i32 nullIndicatorBit
+  8: required string colName;
+  9: required i32 slotIdx
+  10: required bool isMaterialized
+}
+
+struct TTupleDescriptor {
+  1: required Types.TTupleId id
+  2: required i32 byteSize
+  3: required i32 numNullBytes
+  4: optional Types.TTableId tableId
+  5: optional i32 numNullSlots
+}
+
+struct TOlapTableIndexSchema {
+    1: required i64 id
+    2: required list<string> columns
+    3: required i32 schema_hash
+}
+
+struct TOlapTableSchemaParam {
+    1: required i64 db_id
+    2: required i64 table_id
+    3: required i64 version
+
+    // Logical columns, contain all column that in logical table
+    4: required list<TSlotDescriptor> slot_descs
+    5: required TTupleDescriptor tuple_desc
+    6: required list<TOlapTableIndexSchema> indexes
+}
+
+struct TOlapTableIndexTablets {
+    1: required i64 index_id
+    2: required list<i64> tablets
+}
+
+// its a closed-open range
+struct TOlapTablePartition {
+    1: required i64 id
+    // deprecated, use 'start_keys' and 'end_keys' instead
+
+    // how many tablets in one partition
+    4: required i32 num_buckets
+
+    5: required list<TOlapTableIndexTablets> indexes
+
+    6: optional list<TExprNode> start_keys
+    7: optional list<TExprNode> end_keys
+
+    8: optional list<list<TExprNode>> in_keys
+}
+
+struct TOlapTablePartitionParam {
+    1: required i64 db_id
+    2: required i64 table_id
+    3: required i64 version
+
+    // used to split a logical table to multiple paritions
+    // deprecated, use 'partition_columns' instead
+    4: optional string partition_column
+
+    // used to split a partition to multiple tablets
+    5: optional list<string> distributed_columns
+
+    // partitions
+    6: required list<TOlapTablePartition> partitions
+
+    7: optional list<string> partition_columns
+    8: optional list<TExpr> partition_exprs
+
+    9: optional bool enable_automatic_partition
+}
+
+struct TTabletLocation {
+    1: required i64 tablet_id
+    2: required list<i64> node_ids
+}
+
+struct TNodesInfo {
+    1: required i64 version
+    2: required list<TNodeInfo> nodes
+}
+
+struct TNodeInfo {
+    1: required i64 id
+    2: required i64 option
+    3: required string host
+    // used to transfer data between nodes
+    4: required i32 async_internal_port
+}
+
+struct TOlapTableLocationParam {
+    1: required i64 db_id
+    2: required i64 table_id
+    3: required i64 version
+    4: required list<TTabletLocation> tablets
+}
+
+struct TDictQueryExpr {
+  1: required TOlapTableSchemaParam schema
+  2: required TOlapTablePartitionParam partition
+  3: required TOlapTableLocationParam location
+  4: required TNodesInfo nodes_info
+  5: required map<i64, i64> partition_version
+  6: list<string> key_fields
+  7: string value_field
+}
+
 // This is essentially a union over the subclasses of Expr.
 struct TExprNode {
   1: required TExprNodeType node_type
@@ -235,6 +351,8 @@ struct TExprNode {
   52: optional bool is_nullable
   53: optional Types.TTypeDesc child_type_desc
   54: optional bool is_monotonic
+
+  55: optional TDictQueryExpr dict_query_expr
 }
 
 struct TPartitionLiteral {

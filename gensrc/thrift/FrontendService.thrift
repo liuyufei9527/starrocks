@@ -1054,9 +1054,9 @@ struct TCreatePartitionRequest {
 
 struct TCreatePartitionResult {
     1: optional Status.TStatus status
-    2: optional list<Descriptors.TOlapTablePartition> partitions
-    3: optional list<Descriptors.TTabletLocation> tablets
-    4: optional list<Descriptors.TNodeInfo> nodes
+    2: optional list<Exprs.TOlapTablePartition> partitions
+    3: optional list<Exprs.TTabletLocation> tablets
+    4: optional list<Exprs.TNodeInfo> nodes
 }
 
 struct TAuthInfo {
