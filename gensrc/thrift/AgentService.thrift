@@ -49,7 +49,7 @@ struct TTabletSchema {
     4: required Types.TStorageType storage_type
     5: required list<Descriptors.TColumn> columns
     6: optional double bloom_filter_fpp
-    7: optional list<Descriptors.TOlapTableIndex> indexes
+    7: optional list<Exprs.TOlapTableIndex> indexes
     8: optional bool is_in_memory
     9: optional i64 id;
     10: optional list<i32> sort_key_idxes

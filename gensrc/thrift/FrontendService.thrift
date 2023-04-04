@@ -360,8 +360,8 @@ struct TMaterializedViewStatus {
     1: optional string id
     2: optional string database_name
     3: optional string name
-    4: optional string refresh_type 
-    5: optional string is_active 
+    4: optional string refresh_type
+    5: optional string is_active
     6: optional string last_refresh_start_time
     7: optional string last_refresh_finished_time
     8: optional string last_refresh_duration
@@ -371,7 +371,7 @@ struct TMaterializedViewStatus {
     12: optional string text
     13: optional string rows
 
-    14: optional string partition_type 
+    14: optional string partition_type
     15: optional string last_refresh_force_refresh
     16: optional string last_refresh_start_partition
     17: optional string last_refresh_end_partition
@@ -1119,9 +1119,9 @@ struct TCreatePartitionRequest {
 
 struct TCreatePartitionResult {
     1: optional Status.TStatus status
-    2: optional list<Descriptors.TOlapTablePartition> partitions
-    3: optional list<Descriptors.TTabletLocation> tablets
-    4: optional list<Descriptors.TNodeInfo> nodes
+    2: optional list<Exprs.TOlapTablePartition> partitions
+    3: optional list<Exprs.TTabletLocation> tablets
+    4: optional list<Exprs.TNodeInfo> nodes
 }
 
 struct TAuthInfo {
@@ -1334,7 +1334,7 @@ service FrontendService {
     TCreatePartitionResult createPartition(1: TCreatePartitionRequest request)
 
     TUpdateResourceUsageResponse updateResourceUsage(1: TUpdateResourceUsageRequest request)
-    
+
     // For Materialized View
     MVMaintenance.TMVReportEpochResponse mvReport(1: MVMaintenance.TMVMaintenanceTasks request)
 

@@ -30,10 +30,12 @@ import com.starrocks.analysis.CastExpr;
 import com.starrocks.analysis.CloneExpr;
 import com.starrocks.analysis.CollectionElementExpr;
 import com.starrocks.analysis.CompoundPredicate;
+import com.starrocks.analysis.DictQueryExpr;
 import com.starrocks.analysis.ExistsPredicate;
 import com.starrocks.analysis.Expr;
 import com.starrocks.analysis.ExprId;
 import com.starrocks.analysis.FunctionCallExpr;
+import com.starrocks.analysis.FunctionName;
 import com.starrocks.analysis.GroupingFunctionCallExpr;
 import com.starrocks.analysis.InPredicate;
 import com.starrocks.analysis.InformationFunction;
@@ -47,27 +49,43 @@ import com.starrocks.analysis.NullLiteral;
 import com.starrocks.analysis.OrderByElement;
 import com.starrocks.analysis.PlaceHolderExpr;
 import com.starrocks.analysis.Predicate;
+import com.starrocks.analysis.SlotDescriptor;
+import com.starrocks.analysis.SlotId;
 import com.starrocks.analysis.SlotRef;
 import com.starrocks.analysis.StringLiteral;
 import com.starrocks.analysis.SubfieldExpr;
 import com.starrocks.analysis.Subquery;
+import com.starrocks.analysis.TableName;
 import com.starrocks.analysis.TimestampArithmeticExpr;
+import com.starrocks.analysis.TupleDescriptor;
+import com.starrocks.analysis.TupleId;
 import com.starrocks.analysis.VariableExpr;
 import com.starrocks.catalog.AggregateFunction;
 import com.starrocks.catalog.ArrayType;
+import com.starrocks.catalog.Column;
+import com.starrocks.catalog.Database;
 import com.starrocks.catalog.Function;
 import com.starrocks.catalog.FunctionSet;
+import com.starrocks.catalog.KeysType;
 import com.starrocks.catalog.MapType;
+import com.starrocks.catalog.MaterializedView;
+import com.starrocks.catalog.OlapTable;
+import com.starrocks.catalog.Partition;
 import com.starrocks.catalog.PrimitiveType;
 import com.starrocks.catalog.ScalarFunction;
+import com.starrocks.catalog.ScalarType;
 import com.starrocks.catalog.StructField;
 import com.starrocks.catalog.StructType;
+import com.starrocks.catalog.Table;
 import com.starrocks.catalog.TableFunction;
 import com.starrocks.catalog.Type;
 import com.starrocks.cluster.ClusterNamespace;
 import com.starrocks.common.AnalysisException;
 import com.starrocks.common.DdlException;
 import com.starrocks.privilege.AuthorizationMgr;
+import com.starrocks.common.IdGenerator;
+import com.starrocks.common.UserException;
+import com.starrocks.planner.OlapTableParamGenerator;
 import com.starrocks.privilege.PrivilegeException;
 import com.starrocks.privilege.RolePrivilegeCollection;
 import com.starrocks.qe.ConnectContext;
@@ -90,12 +108,18 @@ import com.starrocks.sql.optimizer.base.ColumnRefFactory;
 import com.starrocks.sql.optimizer.operator.scalar.ScalarOperator;
 import com.starrocks.sql.optimizer.transformer.ExpressionMapping;
 import com.starrocks.sql.optimizer.transformer.SqlToScalarOperatorTranslator;
+import com.starrocks.thrift.TDictQueryExpr;
+import com.starrocks.thrift.TFunctionBinaryType;
+import com.starrocks.thrift.TOlapTableSchemaParam;
 
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
@@ -1423,6 +1447,154 @@ public class ExpressionAnalyzer {
 
         @Override
         public Void visitCloneExpr(CloneExpr node, Scope context) {
+            return null;
+        }
+
+        @Override
+        public Void visitDictQueryExpr(DictQueryExpr node, Scope context) {
+            List<Expr> params = node.getParams().exprs();
+            if (!(params.get(0) instanceof StringLiteral)) {
+                throw new SemanticException("dict_mapping function first param table_name should be string literal");
+            }
+            String[] dictTableFullName = ((StringLiteral) params.get(0)).getStringValue().split("\\.");
+            if (dictTableFullName.length != 2) {
+                throw new SemanticException("dict_mapping function first param table_name should be 'db.tbl' format");
+            }
+            TableName tableName = new TableName(dictTableFullName[0], dictTableFullName[1]);
+            Database db = GlobalStateMgr.getCurrentState().getDb(tableName.getDb());
+            if (db == null) {
+                throw new SemanticException("Database %s is not found", tableName.getDb());
+            }
+            Table table = db.getTable(tableName.getTbl());
+            if (table == null) {
+                throw new SemanticException("dict table %s is not found", tableName.getTbl());
+            }
+            if (!(table instanceof OlapTable)) {
+                throw new SemanticException("dict table type is not OlapTable, type=" + table.getClass());
+            }
+            if (table instanceof MaterializedView) {
+                throw new SemanticException("dict table can't be materialized view");
+            }
+            OlapTable dictTable = (OlapTable) table;
+
+            if (dictTable.getKeysType() != KeysType.PRIMARY_KEYS) {
+                throw new SemanticException("dict table " + tableName + " should be primary key table");
+            }
+
+            // verify keys length and type
+            List<Column> keyColumns = new ArrayList<>();
+            Column valueColumn = null;
+            for (Column column : dictTable.getBaseSchema()) {
+                if (column.isKey()) {
+                    keyColumns.add(column);
+                }
+                if (column.isAutoIncrement()) {
+                    valueColumn = column;
+                }
+            }
+            boolean hasValueColumn;
+            if (params.size() == keyColumns.size() + 1) {
+                hasValueColumn = false;
+            } else if (params.size() == keyColumns.size() + 2) {
+                hasValueColumn = true;
+            } else {
+                throw new SemanticException(String.format("dict_mapping function param size should be %d or %d",
+                    keyColumns.size() + 1, keyColumns.size() + 2));
+            }
+
+            String valueField;
+            if (hasValueColumn) {
+                Expr valueFieldExpr = params.get(params.size() - 1);
+                if (!(valueFieldExpr instanceof StringLiteral)) {
+                    throw new SemanticException("dict_mapping function last param should be STRING if specific value column.");
+                }
+                valueField = ((StringLiteral) valueFieldExpr).getStringValue();
+                valueColumn = dictTable.getBaseColumn(valueField);
+                if (valueColumn == null) {
+                    throw new SemanticException("dict_mapping function can't find value column " + valueField + " in dict table");
+                }
+            } else {
+                if (valueColumn == null) {
+                    throw new SemanticException("dict_mapping function can't find auto increment column in dict table");
+                }
+                valueField = valueColumn.getName();
+            }
+            if (valueColumn.getType() != Type.BIGINT) {
+                throw new SemanticException("dict_mapping function value field '" + valueField + "' should be bigint");
+            }
+
+            List<Type> expectTypes = new ArrayList<>();
+            expectTypes.add(Type.VARCHAR);
+            for (Column keyColumn : keyColumns) {
+                expectTypes.add(ScalarType.createType(keyColumn.getType().getPrimitiveType()));
+            }
+            if (hasValueColumn) {
+                expectTypes.add(Type.VARCHAR);
+            }
+            List<Type> actualTypes = params.stream()
+                    .map(expr -> ScalarType.createType(expr.getType().getPrimitiveType())).collect(Collectors.toList());
+            if (!Objects.equals(expectTypes, actualTypes)) {
+                List<String> expectTypeNames = new ArrayList<>();
+                for (int i = 0; i < expectTypes.size(); i++) {
+                    if (i == 0) {
+                        expectTypeNames.add("VARCHAR dict_table");
+                    } else if (hasValueColumn && i == expectTypes.size() - 1) {
+                        expectTypeNames.add("VARCHAR value_field_name");
+                    } else {
+                        expectTypeNames.add(expectTypes.get(i).canonicalName() + " " + keyColumns.get(i - 1).getName());
+                    }
+                }
+                List<String> actualTypeNames = actualTypes.stream().map(Type::canonicalName).collect(Collectors.toList());
+                throw new SemanticException(
+                        String.format("dict_mapping function params not match expected,\nExpect: %s\nActual: %s",
+                            String.join(", ", expectTypeNames), String.join(", ", actualTypeNames)));
+            }
+
+            final TDictQueryExpr dictQueryExpr = new TDictQueryExpr();
+            List<String> keyFields = keyColumns.stream().map(Column::getName).collect(Collectors.toList());
+            TOlapTableSchemaParam schema = OlapTableParamGenerator.createSchema(db.getId(), dictTable);
+            TupleDescriptor tupleDescriptor = new TupleDescriptor(TupleId.createGenerator().getNextId());
+            IdGenerator<SlotId> slotIdIdGenerator = SlotId.createGenerator();
+
+            for (Column column : dictTable.getBaseSchema()) {
+                SlotDescriptor slotDescriptor = new SlotDescriptor(slotIdIdGenerator.getNextId(), tupleDescriptor);
+                slotDescriptor.setColumn(column);
+                slotDescriptor.setIsMaterialized(true);
+                tupleDescriptor.addSlot(slotDescriptor);
+            }
+            for (SlotDescriptor slot : tupleDescriptor.getSlots()) {
+                schema.addToSlot_descs(slot.toThrift());
+            }
+            schema.setTuple_desc(tupleDescriptor.toThrift());
+            dictQueryExpr.setSchema(schema);
+            try {
+                List<Long> allPartitions = dictTable.getAllPartitions().stream()
+                        .map(Partition::getId).collect(Collectors.toList());
+                dictQueryExpr.setPartition(
+                        OlapTableParamGenerator.createPartition(
+                                db.getId(), dictTable, allPartitions, dictTable.supportedAutomaticPartition()));
+                dictQueryExpr.setLocation(OlapTableParamGenerator.createLocation(
+                        dictTable, dictTable.getClusterId(), allPartitions, dictTable.enableReplicatedStorage()));
+                dictQueryExpr.setNodes_info(GlobalStateMgr.getCurrentState().createNodesInfo(dictTable.getClusterId()));
+            } catch (UserException e) {
+                SemanticException semanticException = new SemanticException("build OlapTableParams error in dict_query_expr.");
+                semanticException.initCause(e);
+                throw semanticException;
+            }
+
+            Map<Long, Long> partitionVersion = new HashMap<>();
+            dictTable.getPartitions().forEach(p -> partitionVersion.put(p.getId(), p.getVisibleVersion()));
+            dictQueryExpr.setPartition_version(partitionVersion);
+
+            dictQueryExpr.setKey_fields(keyFields);
+            dictQueryExpr.setValue_field(valueField);
+            node.setType(Type.BIGINT);
+
+            Function fn = new Function(FunctionName.createFnName(FunctionSet.DICT_GET), actualTypes, Type.BIGINT, false);
+            fn.setBinaryType(TFunctionBinaryType.BUILTIN);
+            node.setFn(fn);
+
+            node.setDictQueryExpr(dictQueryExpr);
             return null;
         }
     }
