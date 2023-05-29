@@ -235,9 +235,9 @@ public class OlapTableSink extends DataSink {
         }
         tSink.setNum_replicas(numReplicas);
         tSink.setNeed_gen_rollup(dstTable.shouldLoadToNewRollup());
-        tSink.setSchema(createSchema(tSink.getDb_id(), dstTable));
-        tSink.setPartition(createPartition(tSink.getDb_id(), dstTable));
-        tSink.setLocation(createLocation(dstTable));
+        tSink.setSchema(createSchema(tSink.getDb_id(), dstTable, tupleDescriptor));
+        tSink.setPartition(createPartition(tSink.getDb_id(), dstTable, enableAutomaticPartition, partitionIds));
+        tSink.setLocation(createLocation(dstTable, clusterId, partitionIds, enableReplicatedStorage));
         tSink.setNodes_info(GlobalStateMgr.getCurrentState().createNodesInfo(clusterId));
         tSink.setPartial_update_mode(this.partialUpdateMode);
     }
@@ -267,7 +267,7 @@ public class OlapTableSink extends DataSink {
         return tDataSink;
     }
 
-    private TOlapTableSchemaParam createSchema(long dbId, OlapTable table) {
+    public static TOlapTableSchemaParam createSchema(long dbId, OlapTable table, TupleDescriptor tupleDescriptor) {
         TOlapTableSchemaParam schemaParam = new TOlapTableSchemaParam();
         schemaParam.setDb_id(dbId);
         schemaParam.setTable_id(table.getId());
@@ -292,7 +292,7 @@ public class OlapTableSink extends DataSink {
         return schemaParam;
     }
 
-    private List<String> getDistColumns(DistributionInfo distInfo, OlapTable table) throws UserException {
+    private static List<String> getDistColumns(DistributionInfo distInfo, OlapTable table) throws UserException {
         List<String> distColumns = Lists.newArrayList();
         switch (distInfo.getType()) {
             case HASH: {
@@ -311,7 +311,9 @@ public class OlapTableSink extends DataSink {
         return distColumns;
     }
 
-    private TOlapTablePartitionParam createPartition(long dbId, OlapTable table) throws UserException {
+    public static TOlapTablePartitionParam createPartition(long dbId, OlapTable table,
+                                                            boolean enableAutomaticPartition,
+                                                            List<Long> partitionIds) throws UserException {
         TOlapTablePartitionParam partitionParam = new TOlapTablePartitionParam();
         partitionParam.setDb_id(dbId);
         partitionParam.setTable_id(table.getId());
@@ -392,20 +394,20 @@ public class OlapTableSink extends DataSink {
         return partitionParam;
     }
 
-    private List<TExprNode> literalExprsToTExprNodes(List<LiteralExpr> values) {
+    private static List<TExprNode> literalExprsToTExprNodes(List<LiteralExpr> values) {
         return values.stream()
                 .map(value -> value.treeToThrift().getNodes().get(0))
                 .collect(Collectors.toList());
     }
 
-    private void setListPartitionValues(ListPartitionInfo listPartitionInfo, Partition partition,
+    private static void setListPartitionValues(ListPartitionInfo listPartitionInfo, Partition partition,
                                         TOlapTablePartition tPartition) {
         List<List<TExprNode>> inKeysExprNodes = new ArrayList<>();
 
         List<List<LiteralExpr>> multiValues = listPartitionInfo.getMultiLiteralExprValues().get(partition.getId());
         if (multiValues != null && !multiValues.isEmpty()) {
             inKeysExprNodes = multiValues.stream()
-                    .map(this::literalExprsToTExprNodes)
+                    .map(OlapTableSink::literalExprsToTExprNodes)
                     .collect(Collectors.toList());
             tPartition.setIn_keys(inKeysExprNodes);
         }
@@ -413,7 +415,7 @@ public class OlapTableSink extends DataSink {
         List<LiteralExpr> values = listPartitionInfo.getLiteralExprValues().get(partition.getId());
         if (values != null && !values.isEmpty()) {
             inKeysExprNodes = values.stream()
-                    .map(value -> this.literalExprsToTExprNodes(Lists.newArrayList(value)))
+                    .map(value -> OlapTableSink.literalExprsToTExprNodes(Lists.newArrayList(value)))
                     .collect(Collectors.toList());
         }
 
@@ -422,7 +424,7 @@ public class OlapTableSink extends DataSink {
         }
     }
 
-    private void setRangeKeys(RangePartitionInfo rangePartitionInfo, Partition partition,
+    private static void setRangeKeys(RangePartitionInfo rangePartitionInfo, Partition partition,
                               TOlapTablePartition tPartition) {
         int partColNum = rangePartitionInfo.getPartitionColumns().size();
         Range<PartitionKey> range = rangePartitionInfo.getRange(partition.getId());
@@ -446,7 +448,7 @@ public class OlapTableSink extends DataSink {
         }
     }
 
-    private void setIndexAndBucketNums(Partition partition, TOlapTablePartition tPartition) {
+    private static void setIndexAndBucketNums(Partition partition, TOlapTablePartition tPartition) {
         for (MaterializedIndex index : partition.getMaterializedIndices(IndexExtState.ALL)) {
             tPartition.addToIndexes(new TOlapTableIndexTablets(index.getId(), Lists.newArrayList(
                     index.getTablets().stream().map(Tablet::getId).collect(Collectors.toList()))));
@@ -454,7 +456,7 @@ public class OlapTableSink extends DataSink {
         }
     }
 
-    private DistributionInfo setDistributedColumns(TOlapTablePartitionParam partitionParam,
+    private static DistributionInfo setDistributedColumns(TOlapTablePartitionParam partitionParam,
                                                    DistributionInfo selectedDistInfo,
                                                    Partition partition, OlapTable table) throws UserException {
         DistributionInfo distInfo = partition.getDistributionInfo();
@@ -470,7 +472,8 @@ public class OlapTableSink extends DataSink {
         return selectedDistInfo;
     }
 
-    private TOlapTableLocationParam createLocation(OlapTable table) throws UserException {
+    public static TOlapTableLocationParam createLocation(OlapTable table, int clusterId, List<Long> partitionIds,
+                                                          boolean enableReplicatedStorage) throws UserException {
         TOlapTableLocationParam locationParam = new TOlapTableLocationParam();
         // replica -> path hash
         Multimap<Long, Long> allBePathsMap = HashMultimap.create();

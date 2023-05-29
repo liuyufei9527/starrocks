@@ -96,6 +96,9 @@ public class DictQueryFunctionTest {
         new ExceptionChecker("SELECT dict_mapping('dict.dict_table', 'key', CAST('2023-05-06' AS DATETIME))")
             .ok();
 
+        new ExceptionChecker("SELECT dict_mapping('dict_table', 'key', CAST('2023-05-06' AS DATETIME))")
+            .ok();
+
         new ExceptionChecker("SELECT dict_mapping('dict.dict_table', 'key', CAST('2023-05-06' AS DATETIME), 'value')")
             .ok();
 
@@ -104,8 +107,8 @@ public class DictQueryFunctionTest {
     @Test
     public void testFunctionWithException() throws Exception {
         testDictMappingFunction(
-                "SELECT dict_mapping('tbl', 'k');",
-                "dict_mapping function first param table_name should be 'db.tbl' format.");
+                "SELECT dict_mapping('catalog.db.tbl', 'k');",
+                "dict_mapping function first param table_name should be 'db.tbl' or 'tbl' format.");
 
         testDictMappingFunction(
                 "SELECT dict_mapping('not_exist.dict_table', 'key', '2023-05-06');",

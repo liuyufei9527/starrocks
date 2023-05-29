@@ -70,7 +70,6 @@ import com.starrocks.catalog.KeysType;
 import com.starrocks.catalog.MapType;
 import com.starrocks.catalog.MaterializedView;
 import com.starrocks.catalog.OlapTable;
-import com.starrocks.catalog.Partition;
 import com.starrocks.catalog.PrimitiveType;
 import com.starrocks.catalog.ScalarFunction;
 import com.starrocks.catalog.ScalarType;
@@ -82,10 +81,10 @@ import com.starrocks.catalog.Type;
 import com.starrocks.cluster.ClusterNamespace;
 import com.starrocks.common.AnalysisException;
 import com.starrocks.common.DdlException;
-import com.starrocks.privilege.AuthorizationMgr;
 import com.starrocks.common.IdGenerator;
 import com.starrocks.common.UserException;
-import com.starrocks.planner.OlapTableParamGenerator;
+import com.starrocks.planner.OlapTableSink;
+import com.starrocks.privilege.AuthorizationMgr;
 import com.starrocks.privilege.PrivilegeException;
 import com.starrocks.privilege.RolePrivilegeCollection;
 import com.starrocks.qe.ConnectContext;
@@ -110,7 +109,6 @@ import com.starrocks.sql.optimizer.transformer.ExpressionMapping;
 import com.starrocks.sql.optimizer.transformer.SqlToScalarOperatorTranslator;
 import com.starrocks.thrift.TDictQueryExpr;
 import com.starrocks.thrift.TFunctionBinaryType;
-import com.starrocks.thrift.TOlapTableSchemaParam;
 
 import java.math.BigInteger;
 import java.util.ArrayList;
@@ -1457,10 +1455,16 @@ public class ExpressionAnalyzer {
                 throw new SemanticException("dict_mapping function first param table_name should be string literal");
             }
             String[] dictTableFullName = ((StringLiteral) params.get(0)).getStringValue().split("\\.");
-            if (dictTableFullName.length != 2) {
-                throw new SemanticException("dict_mapping function first param table_name should be 'db.tbl' format");
+            TableName tableName;
+            if (dictTableFullName.length == 1) {
+                tableName = new TableName(null, dictTableFullName[0]);
+                tableName.normalization(session);
+            } else if (dictTableFullName.length == 2) {
+                tableName = new TableName(dictTableFullName[0], dictTableFullName[1]);
+            } else {
+                throw new SemanticException("dict_mapping function first param table_name should be 'db.tbl' or 'tbl' format");
             }
-            TableName tableName = new TableName(dictTableFullName[0], dictTableFullName[1]);
+
             Database db = GlobalStateMgr.getCurrentState().getDb(tableName.getDb());
             if (db == null) {
                 throw new SemanticException("Database %s is not found", tableName.getDb());
@@ -1552,7 +1556,7 @@ public class ExpressionAnalyzer {
 
             final TDictQueryExpr dictQueryExpr = new TDictQueryExpr();
             List<String> keyFields = keyColumns.stream().map(Column::getName).collect(Collectors.toList());
-            TOlapTableSchemaParam schema = OlapTableParamGenerator.createSchema(db.getId(), dictTable);
+
             TupleDescriptor tupleDescriptor = new TupleDescriptor(TupleId.createGenerator().getNextId());
             IdGenerator<SlotId> slotIdIdGenerator = SlotId.createGenerator();
 
@@ -1562,18 +1566,13 @@ public class ExpressionAnalyzer {
                 slotDescriptor.setIsMaterialized(true);
                 tupleDescriptor.addSlot(slotDescriptor);
             }
-            for (SlotDescriptor slot : tupleDescriptor.getSlots()) {
-                schema.addToSlot_descs(slot.toThrift());
-            }
-            schema.setTuple_desc(tupleDescriptor.toThrift());
-            dictQueryExpr.setSchema(schema);
+            dictQueryExpr.setSchema(OlapTableSink.createSchema(db.getId(), dictTable, tupleDescriptor));
             try {
-                List<Long> allPartitions = dictTable.getAllPartitions().stream()
-                        .map(Partition::getId).collect(Collectors.toList());
+                List<Long> allPartitions = dictTable.getAllPartitionIds();
                 dictQueryExpr.setPartition(
-                        OlapTableParamGenerator.createPartition(
-                                db.getId(), dictTable, allPartitions, dictTable.supportedAutomaticPartition()));
-                dictQueryExpr.setLocation(OlapTableParamGenerator.createLocation(
+                        OlapTableSink.createPartition(
+                                db.getId(), dictTable, dictTable.supportedAutomaticPartition(), allPartitions));
+                dictQueryExpr.setLocation(OlapTableSink.createLocation(
                         dictTable, dictTable.getClusterId(), allPartitions, dictTable.enableReplicatedStorage()));
                 dictQueryExpr.setNodes_info(GlobalStateMgr.getCurrentState().createNodesInfo(dictTable.getClusterId()));
             } catch (UserException e) {
