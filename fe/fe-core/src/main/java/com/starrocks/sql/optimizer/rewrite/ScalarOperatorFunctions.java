@@ -36,6 +36,7 @@ package com.starrocks.sql.optimizer.rewrite;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Maps;
 import com.google.re2j.Pattern;
 import com.starrocks.analysis.DecimalLiteral;
 import com.starrocks.catalog.ScalarType;
@@ -66,6 +67,8 @@ import java.time.temporal.ChronoUnit;
 import java.time.temporal.IsoFields;
 import java.time.temporal.TemporalAdjusters;
 import java.time.temporal.TemporalUnit;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 
 import static com.starrocks.catalog.PrimitiveType.BIGINT;
@@ -103,10 +106,21 @@ public class ScalarOperatorFunctions {
 
     private static final LocalDateTime TIME_SLICE_START = LocalDateTime.of(1, 1, 1, 0, 0);
 
+    private static final Map<String, TemporalUnit> TIME_SLICE_UNIT_MAPPING = new HashMap<>();
+
     static {
         for (int shiftBy = 0; shiftBy < CONSTANT_128; ++shiftBy) {
             INT_128_MASK1_ARR1[shiftBy] = INT_128_OPENER.subtract(BigInteger.ONE).shiftRight(shiftBy + 1);
         }
+
+        TIME_SLICE_UNIT_MAPPING.put("second", ChronoUnit.SECONDS);
+        TIME_SLICE_UNIT_MAPPING.put("minute", ChronoUnit.MINUTES);
+        TIME_SLICE_UNIT_MAPPING.put("hour", ChronoUnit.HOURS);
+        TIME_SLICE_UNIT_MAPPING.put("day", ChronoUnit.DAYS);
+        TIME_SLICE_UNIT_MAPPING.put("month", ChronoUnit.MONTHS);
+        TIME_SLICE_UNIT_MAPPING.put("year", ChronoUnit.YEARS);
+        TIME_SLICE_UNIT_MAPPING.put("week", ChronoUnit.WEEKS);
+        TIME_SLICE_UNIT_MAPPING.put("quarter", IsoFields.QUARTER_YEARS);
     }
 
     /**
@@ -528,34 +542,9 @@ public class ScalarOperatorFunctions {
     @ConstantFunction(name = "time_slice", argTypes = {DATETIME, INT, VARCHAR, VARCHAR}, returnType = DATETIME)
     public static ConstantOperator timeSlice(ConstantOperator datetime, ConstantOperator interval,
                                              ConstantOperator unit, ConstantOperator boundary) {
-        TemporalUnit timeUnit;
-        switch (unit.getVarchar()) {
-            case "second":
-                timeUnit = ChronoUnit.SECONDS;
-                break;
-            case "minute":
-                timeUnit = ChronoUnit.MINUTES;
-                break;
-            case "hour":
-                timeUnit = ChronoUnit.HOURS;
-                break;
-            case "day":
-                timeUnit = ChronoUnit.DAYS;
-                break;
-            case "month":
-                timeUnit = ChronoUnit.MONTHS;
-                break;
-            case "year":
-                timeUnit = ChronoUnit.YEARS;
-                break;
-            case "week":
-                timeUnit = ChronoUnit.WEEKS;
-                break;
-            case "quarter":
-                timeUnit = IsoFields.QUARTER_YEARS;
-                break;
-            default:
-                throw new IllegalArgumentException(unit + " not supported in time_slice unit param");
+        TemporalUnit timeUnit = TIME_SLICE_UNIT_MAPPING.get(unit.getVarchar());
+        if (timeUnit == null) {
+            throw new IllegalArgumentException(unit + " not supported in time_slice unit param");
         }
         boolean isEnd;
         switch (boundary.getVarchar()) {
